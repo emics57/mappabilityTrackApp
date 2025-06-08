@@ -1,4 +1,5 @@
 # Run in command line: shiny run app.py
+# use shiny environment
 
 import seaborn as sns
 from shiny import reactive
@@ -12,17 +13,19 @@ from functools import partial
 from shiny.express import input, render, ui
 from shiny.ui import page_navbar
 
+# website title and navigation bar
 ui.page_opts(
     title="Genome Mappability Visualizer",
     page_fn=partial(page_navbar, id="page"), 
     fillable=True
     )
 
-
+# footer (optional)
 footer = ui.input_select(
     "var", "Select variable", choices=["bill_length_mm", "body_mass_g"]
 )
 
+# function to read the uploaded bam file and return as a dataframe
 @reactive.calc
 def readBAMFile():
     if not input.file1():
@@ -53,21 +56,23 @@ def readBAMFile():
     bamDF = pd.DataFrame(bam_data,columns=colNames)
     return bamDF
 
-here = Path(__file__).parent
+# file directory
+home = Path(__file__).parent
 
+# information for the About page
 with ui.nav_panel("About"):
     "Read Categorization for Genome Mappability"
     @render.image
     def backgroundImage():
-        img = {"src": here / "imgs/backgroundMap.png", "width": "500px"}  
+        img = {"src": home / "imgs/backgroundMap.png", "width": "500px"}  
         return img
     
     @render.image
     def mappabilityCategorizationImage():
-        img = {"src": here / "imgs/mapCategories.png", "width": "500px"}  
+        img = {"src": home / "imgs/mapCategories.png", "width": "500px"}  
         return img
 
-
+# Upload Data page
 with ui.nav_panel("Upload Data"):
     with ui.navset_card_underline(title="Mappability Coverage Tracks"):
         with ui.nav_panel("Upload"):
@@ -75,29 +80,32 @@ with ui.nav_panel("Upload Data"):
             ui.input_file("file1", "Choose a file to upload:", multiple=True)
             ui.input_radio_buttons("type", "Type:", ["BAM", "SAM"])
 
-
+# Genome Viewer page
 with ui.nav_panel("Genome Viewer"):
     with ui.navset_card_underline(title="Mappability Coverage Tracks", footer=footer):
+        # plot tab
         with ui.nav_panel("Plot"):
-
             @render.plot
             def hist():
                 df = readBAMFile()
+                # if data file hasnt been uploaded yet
                 if df is None or df.empty:
                     return
+            
                 readSize=df.loc[0,'cigarSize']
-                derivedStartCoord = df.loc[0, 'derivedStart']
-                derivedEndCoord = df.loc[0, 'derivedEnd']
 
-                # obtain uniquely mapped reads
+                # get a count of how many times each readID occurs
                 value_counts = df['readID'].value_counts()
-                unique_mapped_values = value_counts[value_counts == 1].index.tolist()
-                unique_mapped_df = df[df['readID'].isin(unique_mapped_values)& (df['flag'] != '4')]
-                unique_mapped_df['mappedStart'] = unique_mapped_df['mappedStart'].astype(int)
 
-                # mapped coordinates of uniquely mapped reads
+                # UNIQUE READS
+                # turn unique readIDs into a list(readIDs with only count=1)
+                unique_mapped_values = value_counts[value_counts == 1].index.tolist()
+                # filter for only unique readIDs 
+                unique_mapped_df = df[df['readID'].isin(unique_mapped_values) & (df['flag'] != '4')]
+                unique_mapped_df['mappedStart'] = unique_mapped_df['mappedStart'].astype(int)
+                # bring the two lists of mappedStart coord and cigarSize together into one list of tuples [(startCoord, cigarSize)]
                 uniqueList = list(zip(unique_mapped_df['mappedStart'], unique_mapped_df['cigarSize']))
-                uniqueList = sorted(uniqueList, key=lambda x: x[1])
+                uniqueListWithFlag = [tup + ('u',) for tup in uniqueList]
 
                 # MULTIMAPPED READS
                 # plots just the multimapped reads with three or less top alignments
@@ -110,12 +118,15 @@ with ui.nav_panel("Genome Viewer"):
                 topReadCounts = topAlignmentsDF['readID'].value_counts()
                 # Get a list of alignments that appear 2 times or less
                 reads_to_keep = topReadCounts[topReadCounts <= 2].index
-                # Use the isin function to filter the DataFrame for top alignments
+                # filter the DataFrame for top alignments using the isin function
                 top2AlignmentsDF= topAlignmentsDF[topAlignmentsDF['readID'].isin(reads_to_keep)]
                 top2AlignmentsDF['mappedStart'] = top2AlignmentsDF['mappedStart'].astype(int)
                 # mapped coordinates of uniquely mapped reads
                 top2AlignsList = list(zip(top2AlignmentsDF['mappedStart'], top2AlignmentsDF['cigarSize']))
-                top2AlignsList = sorted(top2AlignsList, key=lambda x: x[1])
+                top2AlignsWithFlag = [tup + ('m',) for tup in top2AlignsList]
+
+                # combine unique reads list and top2reads list into one list
+                uniqueAndTop2ReadsList = uniqueListWithFlag + top2AlignsWithFlag
 
                 Purple= '#8B79A5'
                 Green ='#95BCA5'
@@ -124,20 +135,15 @@ with ui.nav_panel("Genome Viewer"):
                 Pink='#FFB6C1'
 
                 finalList = []
-
-                for read in uniqueList:
+                for read in uniqueAndTop2ReadsList:
                     read_start = read[0]
                     read_end = read_start + read[1]
                     block_start = read_start
                     block_width = read[1]
-                    finalList.append([read_start, read_end, block_start, block_width,Purple,False])
-
-                for read in top2AlignsList:
-                    read_start = read[0]
-                    read_end = read_start + read[1]
-                    block_start = read_start
-                    block_width = read[1]
-                    finalList.append([read_start, read_end, block_start, block_width,darkGreen,False])
+                    if read[2] == 'u':
+                        finalList.append([read_start, read_end, block_start, block_width, Purple, False])
+                    elif read[2] == 'm':
+                        finalList.append([read_start, read_end, block_start, block_width, darkGreen, False])
 
                 figureWidth=8
                 figureHeight=5
@@ -146,6 +152,7 @@ with ui.nav_panel("Genome Viewer"):
                 finalList.sort(key=itemgetter(0))
                 count=0
 
+                derivedStartCoord = df.loc[0, 'derivedStart']
                 for ypos in range(1,len(finalList)):
                     lastVal = derivedStartCoord  # HARDCODE
                     for read in finalList:
@@ -162,12 +169,12 @@ with ui.nav_panel("Genome Viewer"):
                                 lastVal = gend
                                 read[5] = True
                                 count+=1
-
-                panel2.set_xlim(derivedStartCoord - 5000,derivedEndCoord + 5000)  # HARDCODE
-                panel2.set_ylim(-1,80)
+                derivedEndCoord = df.loc[0, 'derivedEnd']
+                panel2.set_xlim(derivedStartCoord - 5000, derivedEndCoord + 5000)  # HARDCODE
+                panel2.set_ylim(-1,60)
                 panel2.set_xlabel('Genomic Coordinate (Mb)')
                 return fig
-
+        # table tab
         with ui.nav_panel("Table"):
             @render.data_frame
             def data():
