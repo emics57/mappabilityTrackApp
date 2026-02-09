@@ -1,7 +1,7 @@
 # Run in command line: shiny run app.py
 # use shiny environment
+# conda env list
 
-import seaborn as sns
 from shiny import reactive
 from pathlib import Path
 import pysam
@@ -31,7 +31,8 @@ def readBAMFile():
     if not input.file1():
         return
     bamFile = input.file1()[0]['datapath']
-    alignments = pysam.AlignmentFile(bamFile,"rb")
+    file_mode = "rb" if input.type() == "BAM" else "r"
+    alignments = pysam.AlignmentFile(bamFile, file_mode)
     bam_data = []
     for read in alignments:
         readName = str(read.query_name) # read id
